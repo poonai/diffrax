@@ -18,7 +18,7 @@ _SolverState: TypeAlias = None
 
 
 @dataclass(frozen=True)
-class RosenbrockTableau:
+class _RosenbrockTableau:
     """The coefficient tableau for Rosenbrock methods"""
 
     m_sol: jnp.ndarray
@@ -39,26 +39,7 @@ class RosenbrockTableau:
     #    | m1  m2  m3
     #    | me1 me2 me3
 
-
-RosenbrockTableau.__init__.__doc__ = """**Arguments:**
-
-- m_sol: the linear combination of stages to produce the increment of the solution.
-- m_error: the linear combination of stages to produce the increment of lower order
-    solution. It is used for error estimation.
-- a_lower: the lower triangle of a[i][j] matrix. The first array represents the 
-    should be of shape `(1,)`. Each subsequent array should be of shape `(2,)`, 
-    `(3,)` etc. The final array should have shape `(k - 1,)`. It is linear combination
-    of previous stage to calculate the current stage and used as increment for y.
-- c_lower: the lower triangle of c[i][j] matrix. The first array represents the 
-    should be of shape `(1,)`. Each subsequent array should be of shape `(2,)`, 
-    `(3,)` etc. The final array should have shape `(k - 1,)`.It is linear combination
-    of previous stage, used as stability increment for current stage.
-- α: the time increment coefficient.
-- γ: the stage multipler for time derivative.
-
-"""
-
-_tableau = RosenbrockTableau(
+_tableau = _RosenbrockTableau(
     m_sol=jnp.array([2.0, 0.5773502691896258, 0.4226497308103742]),
     m_error=jnp.array([2.113248654051871, 1.0, 0.4226497308103742]),
     a_lower=(jnp.array([1.267949192431123]), jnp.array([1.267949192431123, 0.0])),
@@ -105,7 +86,7 @@ class Ros3p(AbstractAdaptiveSolver):
         LocalLinearInterpolation
     )
 
-    tableau: ClassVar[RosenbrockTableau] = _tableau
+    tableau: ClassVar[_RosenbrockTableau] = _tableau
 
     def init(self, terms, t0, t1, y0, args) -> _SolverState:
         del terms, t0, t1, y0, args
