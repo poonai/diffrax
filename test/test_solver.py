@@ -58,9 +58,9 @@ class _DoubleDopri5(diffrax.AbstractRungeKutta):
     tableau: ClassVar[diffrax.MultiButcherTableau] = diffrax.MultiButcherTableau(
         diffrax.Dopri5.tableau, diffrax.Dopri5.tableau
     )
-    calculate_jacobian: ClassVar[
-        diffrax.CalculateJacobian
-    ] = diffrax.CalculateJacobian.never
+    calculate_jacobian: ClassVar[diffrax.CalculateJacobian] = (
+        diffrax.CalculateJacobian.never
+    )
 
     @staticmethod
     def interpolation_cls(**kwargs):
@@ -477,6 +477,38 @@ def test_implicit_closure_convert():
         return out.ys[0]  # pyright: ignore
 
     f(1.0)
+
+
+def test_ros3p():
+    term = diffrax.ODETerm(lambda t, y, args: -50.0 * y + jnp.sin(t))
+    solver = diffrax.Ros3p()
+    t0 = 0
+    t1 = 5
+    y0 = jnp.array([0], dtype=jnp.float64)
+    ts = jnp.array([1.0, 2.0, 3.0], dtype=jnp.float64)
+    saveat = diffrax.SaveAt(ts=ts)
+
+    stepsize_controller = diffrax.PIDController(rtol=1e-10, atol=1e-12)
+    sol = diffrax.diffeqsolve(
+        term,
+        solver,
+        t0=t0,
+        t1=t1,
+        dt0=0.1,
+        y0=y0,
+        stepsize_controller=stepsize_controller,
+        max_steps= 60000,
+        saveat=saveat,
+    )
+
+    def exact_sol(t):
+        return (
+            jnp.exp(-50.0 * t) * (y0[0] + 1 / 2501)
+            + (50.0 * jnp.sin(t) - jnp.cos(t)) / 2501
+        )
+        
+    ys_ref = jtu.tree_map(exact_sol, ts)
+    tree_allclose(ys_ref, sol.ys)
 
 
 # Doesn't crash
