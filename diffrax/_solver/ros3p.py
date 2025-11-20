@@ -39,6 +39,7 @@ class _RosenbrockTableau:
     #    | m1  m2  m3
     #    | me1 me2 me3
 
+
 _tableau = _RosenbrockTableau(
     m_sol=jnp.array([2.0, 0.5773502691896258, 0.4226497308103742]),
     m_error=jnp.array([2.113248654051871, 1.0, 0.4226497308103742]),
@@ -82,9 +83,9 @@ class Ros3p(AbstractAdaptiveSolver):
     """
 
     term_structure: ClassVar = AbstractTerm
-    interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
-        LocalLinearInterpolation
-    )
+    interpolation_cls: ClassVar[
+        Callable[..., LocalLinearInterpolation]
+    ] = LocalLinearInterpolation
 
     tableau: ClassVar[_RosenbrockTableau] = _tableau
 

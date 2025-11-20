@@ -58,9 +58,9 @@ class _DoubleDopri5(diffrax.AbstractRungeKutta):
     tableau: ClassVar[diffrax.MultiButcherTableau] = diffrax.MultiButcherTableau(
         diffrax.Dopri5.tableau, diffrax.Dopri5.tableau
     )
-    calculate_jacobian: ClassVar[diffrax.CalculateJacobian] = (
-        diffrax.CalculateJacobian.never
-    )
+    calculate_jacobian: ClassVar[
+        diffrax.CalculateJacobian
+    ] = diffrax.CalculateJacobian.never
 
     @staticmethod
     def interpolation_cls(**kwargs):
@@ -497,7 +497,7 @@ def test_ros3p():
         dt0=0.1,
         y0=y0,
         stepsize_controller=stepsize_controller,
-        max_steps= 60000,
+        max_steps=60000,
         saveat=saveat,
     )
 
@@ -506,7 +506,7 @@ def test_ros3p():
             jnp.exp(-50.0 * t) * (y0[0] + 1 / 2501)
             + (50.0 * jnp.sin(t) - jnp.cos(t)) / 2501
         )
-        
+
     ys_ref = jtu.tree_map(exact_sol, ts)
     tree_allclose(ys_ref, sol.ys)
 
