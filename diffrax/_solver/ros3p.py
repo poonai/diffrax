@@ -50,13 +50,11 @@ _tableau = _RosenbrockTableau(
     m_sol=np.array([2.0, 0.5773502691896258, 0.4226497308103742]),
     m_error=np.array([2.113248654051871, 1.0, 0.4226497308103742]),
     a_lower=(
-        np.array([0.0, 0.0]),
-        np.array([1.267949192431123, 0.0]),
+        np.array([1.267949192431123]),
         np.array([1.267949192431123, 0.0]),
     ),
     c_lower=(
-        np.array([0.0, 0.0]),
-        np.array([-1.607695154586736, 0.0]),
+        np.array([-1.607695154586736]),
         np.array([-3.464101615137755, -1.732050807568877]),
     ),
     α=np.array([0.0, 1.0, 1.0]),
@@ -125,8 +123,17 @@ class Ros3p(AbstractAdaptiveSolver):
 
         γ = jnp.array(self.tableau.γ)
         α = jnp.array(self.tableau.α)
-        a_lower = jnp.array(self.tableau.a_lower)
-        c_lower = jnp.array(self.tableau.c_lower)
+
+        def embed_lower(x):
+            out = np.zeros(
+                (self.tableau.num_stages, self.tableau.num_stages), dtype=np.float64
+            )
+            for i, val in enumerate(x):
+                out[i + 1, : i + 1] = val
+            return jnp.array(out, jnp.float64)
+
+        a_lower = embed_lower(self.tableau.a_lower)
+        c_lower = embed_lower(self.tableau.c_lower)
         m_sol = jnp.array(self.tableau.m_sol)
         m_error = jnp.array(self.tableau.m_error)
 
