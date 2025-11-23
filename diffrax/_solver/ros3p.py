@@ -49,8 +49,13 @@ class _RosenbrockTableau:
 _tableau = _RosenbrockTableau(
     m_sol=np.array([2.0, 0.5773502691896258, 0.4226497308103742]),
     m_error=np.array([2.113248654051871, 1.0, 0.4226497308103742]),
-    a_lower=(np.array([1.267949192431123, 0.0]), np.array([1.267949192431123, 0.0])),
+    a_lower=(
+        np.array([0.0, 0.0]),
+        np.array([1.267949192431123, 0.0]),
+        np.array([1.267949192431123, 0.0]),
+    ),
     c_lower=(
+        np.array([0.0, 0.0]),
         np.array([-1.607695154586736, 0.0]),
         np.array([-3.464101615137755, -1.732050807568877]),
     ),
@@ -134,65 +139,41 @@ class Ros3p(AbstractAdaptiveSolver):
                 lambda y, args: terms.vf(t0, y, args), y0, args=args
             )
         )
+
+        u = jnp.zeros((len(time_derivative), self.tableau.num_stages),dtype=jnp.float64)
+        def body(_carry, stage):
+            b = (
+                terms.vf(
+                    (t0**ω + α[stage] ** ω * control**ω).ω,
+                    (
+                        y0**ω
+                        + (a_lower[stage][0] ** ω * u[:, 0] ** ω)
+                        + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
+                    ).ω,
+                    args,
+                )
+                ** ω
+                + ((c_lower[stage][0] ** ω / control**ω) * u[:, 0] ** ω)
+                + ((c_lower[stage][1] ** ω / control**ω) * u[:, 1] ** ω)
+                + (control**ω * γ[stage] ** ω * time_derivative**ω)
+            ).ω
+            stage_u = lx.linear_solve(A,b).value
+            u.at[:,stage].set(stage_u)
+            return _carry, stage
         
-        u = jnp.zeros((len(time_derivative),self.tableau.num_stages))
-        
-        # stage 1
-        stage_1_b = (
-            terms.vf(
-                (t0**ω + (α[0] ** ω * control**ω)).ω,
-                y0,
-                args,
-            )
-            ** ω
-            + (control**ω * γ[0] ** ω * time_derivative**ω)
-        ).ω
-
-        # solving Ax=b
-        u1 = lx.linear_solve(A, stage_1_b).value
-
-        # stage 2
-        stage_2_b = (
-            terms.vf(
-                (t0**ω + (α[1] ** ω * control**ω)).ω,
-                (y0**ω + (a_lower[0][0] ** ω * u1**ω)).ω,
-                args,
-            )
-            ** ω
-            + ((c_lower[0][0] ** ω / control**ω) * u1**ω)
-            + (control**ω * γ[1] ** ω * time_derivative**ω)
-        ).ω
-
-        # solving Ax=b
-        u2 = lx.linear_solve(A, stage_2_b).value
-
-        # stage 3
-        stage_3_b = (
-            terms.vf(
-                (t0**ω + α[2] ** ω * control**ω).ω,
-                (y0**ω + (a_lower[1][0] ** ω * u1**ω) + (a_lower[1][1] ** ω * u2**ω)).ω,
-                args,
-            )
-            ** ω
-            + ((c_lower[1][0] ** ω / control**ω) * u1**ω)
-            + ((c_lower[1][1] ** ω / control**ω) * u2**ω)
-            + (control**ω * γ[2] ** ω * time_derivative**ω)
-        ).ω
-
-        # solving Ax=b
-        u3 = lx.linear_solve(A, stage_3_b).value
+        lax.scan(f=body, init=0, xs=jnp.arange(self.tableau.num_stages))
 
         y1 = (
             y0**ω
-            + m_sol[0] ** ω * u1**ω
-            + m_sol[1] ** ω * u2**ω
-            + m_sol[2] ** ω * u3**ω
+            + m_sol[0] ** ω * u[:,0]**ω
+            + m_sol[1] ** ω * u[:,1]**ω
+            + m_sol[2] ** ω * u[:,2]**ω
         ).ω
         y1_lower = (
             y0**ω
-            + m_error[0] ** ω * u1**ω
-            + m_error[1] ** ω * u2**ω
-            + m_error[2] ** ω * u3**ω
+            + m_error[0] ** ω * u[:,0]**ω
+            + m_error[1] ** ω * u[:,1]**ω
+            + m_error[2] ** ω * u[:,2]**ω
         ).ω
 
         y1_error = y1 - y1_lower
