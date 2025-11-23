@@ -8,7 +8,7 @@ import lineax as lx
 from equinox.internal import ω
 
 from .._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
-from .._local_interpolation import LocalLinearInterpolation
+from .._local_interpolation import ThirdOrderHermitePolynomialInterpolation
 from .._solution import RESULTS
 from .._term import AbstractTerm
 from .base import AbstractAdaptiveSolver
@@ -95,9 +95,9 @@ class Ros3p(AbstractAdaptiveSolver):
     """
 
     term_structure: ClassVar = AbstractTerm
-    interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
-        LocalLinearInterpolation
-    )
+    interpolation_cls: ClassVar[
+        Callable[..., ThirdOrderHermitePolynomialInterpolation]
+    ] = ThirdOrderHermitePolynomialInterpolation.from_k
 
     tableau: ClassVar[_RosenbrockTableau] = _tableau
 
@@ -140,7 +140,10 @@ class Ros3p(AbstractAdaptiveSolver):
             )
         )
 
-        u = jnp.zeros((len(time_derivative), self.tableau.num_stages),dtype=jnp.float64)
+        u = jnp.zeros(
+            (len(time_derivative), self.tableau.num_stages), dtype=jnp.float64
+        )
+
         def body(_carry, stage):
             b = (
                 terms.vf(
@@ -157,27 +160,31 @@ class Ros3p(AbstractAdaptiveSolver):
                 + ((c_lower[stage][1] ** ω / control**ω) * u[:, 1] ** ω)
                 + (control**ω * γ[stage] ** ω * time_derivative**ω)
             ).ω
-            stage_u = lx.linear_solve(A,b).value
-            u.at[:,stage].set(stage_u)
+            stage_u = lx.linear_solve(A, b).value
+            u.at[:, stage].set(stage_u)
             return _carry, stage
-        
+
         lax.scan(f=body, init=0, xs=jnp.arange(self.tableau.num_stages))
 
         y1 = (
             y0**ω
-            + m_sol[0] ** ω * u[:,0]**ω
-            + m_sol[1] ** ω * u[:,1]**ω
-            + m_sol[2] ** ω * u[:,2]**ω
+            + m_sol[0] ** ω * u[:, 0] ** ω
+            + m_sol[1] ** ω * u[:, 1] ** ω
+            + m_sol[2] ** ω * u[:, 2] ** ω
         ).ω
         y1_lower = (
             y0**ω
-            + m_error[0] ** ω * u[:,0]**ω
-            + m_error[1] ** ω * u[:,1]**ω
-            + m_error[2] ** ω * u[:,2]**ω
+            + m_error[0] ** ω * u[:, 0] ** ω
+            + m_error[1] ** ω * u[:, 1] ** ω
+            + m_error[2] ** ω * u[:, 2] ** ω
         ).ω
-
         y1_error = y1 - y1_lower
-        dense_info = dict(y0=y0, y1=y1)
+
+        k1 = (u[:, 0] ** ω - (control**ω * γ[0] ** ω * time_derivative**ω)).ω
+        k2 = terms.vf(t1, y1, args)
+        k = jnp.stack((k1, k2))
+
+        dense_info = dict(y0=y0, y1=y1, k=k)
         return y1, y1_error, dense_info, None, RESULTS.successful
 
     def func(
