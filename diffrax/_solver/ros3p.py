@@ -83,9 +83,9 @@ class Ros3p(AbstractAdaptiveSolver):
     """
 
     term_structure: ClassVar = AbstractTerm
-    interpolation_cls: ClassVar[
-        Callable[..., LocalLinearInterpolation]
-    ] = LocalLinearInterpolation
+    interpolation_cls: ClassVar[Callable[..., LocalLinearInterpolation]] = (
+        LocalLinearInterpolation
+    )
 
     tableau: ClassVar[_RosenbrockTableau] = _tableau
 
@@ -109,12 +109,13 @@ class Ros3p(AbstractAdaptiveSolver):
         del made_jump, solver_state
 
         time_derivative = jax.jacfwd(lambda t: terms.vf(t, y0, args))(t0)
-
-        eye = jnp.eye(len(time_derivative))
         control = terms.contr(t0, t1)
 
         # common L.H.S
-        A = (lx.MatrixLinearOperator(eye) / (control * self.tableau.γ[0])) - (
+        eye_shape = jax.ShapeDtypeStruct(
+            (time_derivative.shape[-1],), time_derivative.dtype
+        )
+        A = (lx.IdentityLinearOperator(eye_shape) / (control * self.tableau.γ[0])) - (
             lx.JacobianLinearOperator(
                 lambda y, args: terms.vf(t0, y, args), y0, args=args
             )
