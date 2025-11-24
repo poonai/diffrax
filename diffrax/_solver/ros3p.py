@@ -18,7 +18,7 @@ import lineax.internal as lxi
 import jax.lax as lax
 
 
-_SolverState: TypeAlias = None
+_SolverState: TypeAlias = VF
 
 
 @dataclass(frozen=True)
@@ -100,8 +100,8 @@ class Ros3p(AbstractAdaptiveSolver):
     tableau: ClassVar[_RosenbrockTableau] = _tableau
 
     def init(self, terms, t0, t1, y0, args) -> _SolverState:
-        del terms, t0, t1, y0, args
-        return None
+        del t1
+        return terms.vf(t0, y0, args)
 
     def order(self, terms):
         return 3
@@ -116,7 +116,7 @@ class Ros3p(AbstractAdaptiveSolver):
         solver_state: _SolverState,
         made_jump: BoolScalarLike,
     ) -> tuple[Y, Y, DenseInfo, _SolverState, RESULTS]:
-        del made_jump, solver_state
+        del made_jump
 
         time_derivative = jax.jacfwd(lambda t: terms.vf(t, y0, args))(t0)
         control = terms.contr(t0, t1)
@@ -150,18 +150,22 @@ class Ros3p(AbstractAdaptiveSolver):
         u = jnp.zeros(
             (len(time_derivative), self.tableau.num_stages), dtype=jnp.float64
         )
+        
+        def stage_vf(stage):
+            return terms.vf(
+                (t0**ω + α[stage] ** ω * control**ω).ω,
+                (
+                    y0**ω
+                    + (a_lower[stage][0] ** ω * u[:, 0] ** ω)
+                    + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
+                ).ω,
+                args,
+            )
 
         def body(_carry, stage):
+            lax.cond(stage == 0, lambda _: solver_state, stage_vf, stage)
             b = (
-                terms.vf(
-                    (t0**ω + α[stage] ** ω * control**ω).ω,
-                    (
-                        y0**ω
-                        + (a_lower[stage][0] ** ω * u[:, 0] ** ω)
-                        + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
-                    ).ω,
-                    args,
-                )
+                stage_vf(stage)
                 ** ω
                 + ((c_lower[stage][0] ** ω / control**ω) * u[:, 0] ** ω)
                 + ((c_lower[stage][1] ** ω / control**ω) * u[:, 1] ** ω)
@@ -192,7 +196,7 @@ class Ros3p(AbstractAdaptiveSolver):
         k = jnp.stack((k1, k2))
 
         dense_info = dict(y0=y0, y1=y1, k=k)
-        return y1, y1_error, dense_info, None, RESULTS.successful
+        return y1, y1_error, dense_info, k2, RESULTS.successful
 
     def func(
         self,
