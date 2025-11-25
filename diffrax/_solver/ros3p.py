@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import lineax as lx
 from equinox.internal import ω
+import equinox.internal as eqxi
 
 from .._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
 from .._local_interpolation import ThirdOrderHermitePolynomialInterpolation
@@ -116,8 +117,6 @@ class Ros3p(AbstractAdaptiveSolver):
         solver_state: _SolverState,
         made_jump: BoolScalarLike,
     ) -> tuple[Y, Y, DenseInfo, _SolverState, RESULTS]:
-        del made_jump
-
         time_derivative = jax.jacfwd(lambda t: terms.vf(t, y0, args))(t0)
         control = terms.contr(t0, t1)
 
@@ -150,22 +149,34 @@ class Ros3p(AbstractAdaptiveSolver):
         u = jnp.zeros(
             (len(time_derivative), self.tableau.num_stages), dtype=jnp.float64
         )
-        
-        def stage_vf(stage):
-            return terms.vf(
-                (t0**ω + α[stage] ** ω * control**ω).ω,
-                (
-                    y0**ω
-                    + (a_lower[stage][0] ** ω * u[:, 0] ** ω)
-                    + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
-                ).ω,
-                args,
-            )
+
+        start_stage = [0]
+
+        def use_saved_vf():
+            stage_0_vf = solver_state
+            stage_0_b = (
+                stage_0_vf**ω + (control**ω * γ[0] ** ω * time_derivative**ω)
+            ).ω
+            stage_0_u = lx.linear_solve(A, stage_0_b).value
+            u.at[:, 0].set(stage_0_u)
+            start_stage[0] = 1
+
+        if made_jump is False:
+            use_saved_vf()
+        else:
+            lax.cond(eqxi.unvmap_any(made_jump), use_saved_vf, lambda: None)
 
         def body(_carry, stage):
-            lax.cond(stage == 0, lambda _: solver_state, stage_vf, stage)
             b = (
-                stage_vf(stage)
+                terms.vf(
+                    (t0**ω + α[stage] ** ω * control**ω).ω,
+                    (
+                        y0**ω
+                        + (a_lower[stage][0] ** ω * u[:, 0] ** ω)
+                        + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
+                    ).ω,
+                    args,
+                )
                 ** ω
                 + ((c_lower[stage][0] ** ω / control**ω) * u[:, 0] ** ω)
                 + ((c_lower[stage][1] ** ω / control**ω) * u[:, 1] ** ω)
@@ -175,7 +186,7 @@ class Ros3p(AbstractAdaptiveSolver):
             u.at[:, stage].set(stage_u)
             return _carry, stage
 
-        lax.scan(f=body, init=0, xs=jnp.arange(self.tableau.num_stages))
+        lax.scan(f=body, init=0, xs=jnp.arange(start_stage[0], self.tableau.num_stages))
 
         y1 = (
             y0**ω
