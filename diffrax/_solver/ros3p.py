@@ -10,13 +10,13 @@ import equinox.internal as eqxi
 
 from .._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF, Y
 from .._local_interpolation import ThirdOrderHermitePolynomialInterpolation
+
 from .._solution import RESULTS
 from .._term import AbstractTerm
 from .base import AbstractAdaptiveSolver
 import numpy as np
-import jax.tree_util as jtu
-import lineax.internal as lxi
 import jax.lax as lax
+import jax.tree_util as jtu
 
 
 _SolverState: TypeAlias = VF
@@ -119,6 +119,16 @@ class Ros3p(AbstractAdaptiveSolver):
     ) -> tuple[Y, Y, DenseInfo, _SolverState, RESULTS]:
         time_derivative = jax.jacfwd(lambda t: terms.vf(t, y0, args))(t0)
         control = terms.contr(t0, t1)
+        
+        def _sum(*x):
+            return sum(x[1:], x[0])
+        
+        def sum_if_tuple(arr):
+            print("no")
+            if isinstance(arr, tuple):
+                print("sum_if_tuple", arr)
+                return jtu.tree_map(_sum, *arr)
+            return arr
 
         γ = jnp.array(self.tableau.γ)
         α = jnp.array(self.tableau.α)
@@ -135,10 +145,12 @@ class Ros3p(AbstractAdaptiveSolver):
         c_lower = embed_lower(self.tableau.c_lower)
         m_sol = jnp.array(self.tableau.m_sol)
         m_error = jnp.array(self.tableau.m_error)
-
+        jax.debug.print("solver_state: {}", solver_state)
+        time_derivative = sum_if_tuple(time_derivative)
+        print("time_derivative", solver_state)
         # common L.H.S
         eye_shape = jax.ShapeDtypeStruct(
-            (time_derivative.shape[-1],), time_derivative.dtype
+            (solver_state.shape[-1],), time_derivative.dtype
         )
         A = (lx.IdentityLinearOperator(eye_shape) / (control * γ[0])) - (
             lx.JacobianLinearOperator(
@@ -150,25 +162,27 @@ class Ros3p(AbstractAdaptiveSolver):
             (len(time_derivative), self.tableau.num_stages), dtype=jnp.float64
         )
 
-        start_stage = [0]
+        start_stage = 0
 
-        def use_saved_vf():
+        def use_saved_vf(u):
             stage_0_vf = solver_state
             stage_0_b = (
                 stage_0_vf**ω + (control**ω * γ[0] ** ω * time_derivative**ω)
             ).ω
             stage_0_u = lx.linear_solve(A, stage_0_b).value
-            u.at[:, 0].set(stage_0_u)
-            start_stage[0] = 1
+            u = u.at[:, 0].set(stage_0_u)
+            start_stage = 1
+            return u, start_stage
 
         if made_jump is False:
-            use_saved_vf()
+            u, start_stage = use_saved_vf(u)
         else:
-            lax.cond(eqxi.unvmap_any(made_jump), use_saved_vf, lambda: None)
+            u, start_stage = lax.cond(
+                eqxi.unvmap_any(made_jump), use_saved_vf, lambda u: u, u
+            )
 
-        def body(_carry, stage):
-            b = (
-                terms.vf(
+        def body(u, stage):
+            vf = terms.vf(
                     (t0**ω + α[stage] ** ω * control**ω).ω,
                     (
                         y0**ω
@@ -176,17 +190,21 @@ class Ros3p(AbstractAdaptiveSolver):
                         + (a_lower[stage][1] ** ω * u[:, 1] ** ω)
                     ).ω,
                     args,
-                )
-                ** ω
+                ) 
+            vf = sum_if_tuple(vf)
+            b = (
+                vf**ω
                 + ((c_lower[stage][0] ** ω / control**ω) * u[:, 0] ** ω)
                 + ((c_lower[stage][1] ** ω / control**ω) * u[:, 1] ** ω)
                 + (control**ω * γ[stage] ** ω * time_derivative**ω)
             ).ω
             stage_u = lx.linear_solve(A, b).value
-            u.at[:, stage].set(stage_u)
-            return _carry, stage
+            u = u.at[:, stage].set(stage_u)
+            return u, None
 
-        lax.scan(f=body, init=0, xs=jnp.arange(start_stage[0], self.tableau.num_stages))
+        u, _ = lax.scan(
+            f=body, init=u, xs=jnp.arange(start_stage, self.tableau.num_stages)
+        )
 
         y1 = (
             y0**ω
@@ -202,12 +220,12 @@ class Ros3p(AbstractAdaptiveSolver):
         ).ω
         y1_error = y1 - y1_lower
 
-        k1 = (u[:, 0] ** ω - (control**ω * γ[0] ** ω * time_derivative**ω)).ω
-        k2 = terms.vf(t1, y1, args)
-        k = jnp.stack((k1, k2))
+        vf0 = solver_state
+        vf1 = sum_if_tuple(terms.vf(t1, y1, args))
+        k = jnp.stack((vf0 * control, vf1 * control))
 
         dense_info = dict(y0=y0, y1=y1, k=k)
-        return y1, y1_error, dense_info, k2, RESULTS.successful
+        return y1, y1_error, dense_info, vf1, RESULTS.successful
 
     def func(
         self,
