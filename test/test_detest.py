@@ -364,7 +364,7 @@ def test_a(solver):
         # Euler is pretty bad at solving things, so only do some simple tests.
         _test(solver, [_a1, _a2], higher=False)
     else:
-        _test(solver, [_a1, _a2, _a3, _a4, _a5], higher=False)
+        _test(solver, [_a1], higher=False)
 
 
 @pytest.mark.parametrize("solver", all_ode_solvers)

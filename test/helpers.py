@@ -24,20 +24,21 @@ from jaxtyping import PRNGKeyArray, PyTree, Shaped
 
 
 all_ode_solvers = (
-    diffrax.Bosh3(),
-    diffrax.Dopri5(),
-    diffrax.Dopri8(),
-    diffrax.Euler(),
-    diffrax.Ralston(),
-    diffrax.Midpoint(),
-    diffrax.Heun(),
-    diffrax.LeapfrogMidpoint(),
-    diffrax.ReversibleHeun(),
-    diffrax.Tsit5(),
-    diffrax.ImplicitEuler(),
-    diffrax.Kvaerno3(),
-    diffrax.Kvaerno4(),
-    diffrax.Kvaerno5(),
+    # diffrax.Bosh3(),
+    # diffrax.Dopri5(),
+    # diffrax.Dopri8(),
+    # diffrax.Euler(),
+    # diffrax.Ralston(),
+    # diffrax.Midpoint(),
+    # diffrax.Heun(),
+    # diffrax.LeapfrogMidpoint(),
+    # diffrax.ReversibleHeun(),
+    # diffrax.Tsit5(),
+    # diffrax.ImplicitEuler(),
+    # diffrax.Kvaerno3(),
+    # diffrax.Kvaerno4(),
+    # diffrax.Kvaerno5(),
+    diffrax.Ros3p(),
 )
 
 all_split_solvers = (

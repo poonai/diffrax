@@ -124,9 +124,7 @@ class Ros3p(AbstractAdaptiveSolver):
             return sum(x[1:], x[0])
         
         def sum_if_tuple(arr):
-            print("no")
             if isinstance(arr, tuple):
-                print("sum_if_tuple", arr)
                 return jtu.tree_map(_sum, *arr)
             return arr
 
@@ -145,12 +143,10 @@ class Ros3p(AbstractAdaptiveSolver):
         c_lower = embed_lower(self.tableau.c_lower)
         m_sol = jnp.array(self.tableau.m_sol)
         m_error = jnp.array(self.tableau.m_error)
-        jax.debug.print("solver_state: {}", solver_state)
         time_derivative = sum_if_tuple(time_derivative)
-        print("time_derivative", solver_state)
         # common L.H.S
         eye_shape = jax.ShapeDtypeStruct(
-            (solver_state.shape[-1],), time_derivative.dtype
+            (time_derivative.shape[-1],), time_derivative.dtype
         )
         A = (lx.IdentityLinearOperator(eye_shape) / (control * γ[0])) - (
             lx.JacobianLinearOperator(
@@ -159,7 +155,7 @@ class Ros3p(AbstractAdaptiveSolver):
         )
 
         u = jnp.zeros(
-            (len(time_derivative), self.tableau.num_stages), dtype=jnp.float64
+            (time_derivative.shape[0], self.tableau.num_stages), dtype=jnp.float64
         )
 
         start_stage = 0

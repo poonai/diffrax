@@ -415,6 +415,7 @@ def test_sil3(dtype):
         diffrax.KenCarp3(),
         diffrax.KenCarp4(),
         diffrax.KenCarp5(),
+        diffrax.Ros3p(),
     ),
 )
 def test_rober(solver):
@@ -484,7 +485,7 @@ def test_ros3p():
     solver = diffrax.Ros3p()
     t0 = 0
     t1 = 5
-    y0 = jnp.array([0], dtype=jnp.float64)
+    y0 = 0
     ts = jnp.array([1.0, 2.0, 3.0], dtype=jnp.float64)
     saveat = diffrax.SaveAt(ts=ts)
 
@@ -503,7 +504,7 @@ def test_ros3p():
 
     def exact_sol(t):
         return (
-            jnp.exp(-50.0 * t) * (y0[0] + 1 / 2501)
+            jnp.exp(-50.0 * t) * (y0 + 1 / 2501)
             + (50.0 * jnp.sin(t) - jnp.cos(t)) / 2501
         )
 
