@@ -956,7 +956,6 @@ def diffeqsolve(
     # Initial set-up
     #
     
-    y0 = jnp.atleast_1d(y0)
 
     # Backward compatibility
     if discrete_terminating_event is not None:
