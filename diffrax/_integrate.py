@@ -53,6 +53,7 @@ from ._solver import (
     EulerHeun,
     ItoMilstein,
     StratonovichMilstein,
+    Ros3p,
 )
 from ._step_size_controller import (
     AbstractAdaptiveStepSizeController,
@@ -955,7 +956,6 @@ def diffeqsolve(
     #
     # Initial set-up
     #
-    
 
     # Backward compatibility
     if discrete_terminating_event is not None:
@@ -992,6 +992,9 @@ def diffeqsolve(
         eqx.is_array_like(xi) and jnp.iscomplexobj(xi)
         for xi in jtu.tree_leaves((terms, y0, args))
     ):
+        if isinstance(solver, Ros3p):
+            raise ValueError("Ros3p does not support complex dtypes.")
+
         warnings.warn(
             "Complex dtype support in Diffrax is a work in progress and may not yet "
             "produce correct results. Consider splitting your computation into real "

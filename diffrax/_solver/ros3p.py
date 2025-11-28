@@ -12,7 +12,7 @@ from .._custom_types import Args, BoolScalarLike, DenseInfo, RealScalarLike, VF,
 from .._local_interpolation import ThirdOrderHermitePolynomialInterpolation
 
 from .._solution import RESULTS
-from .._term import AbstractTerm
+from .._term import ODETerm
 from .base import AbstractAdaptiveSolver
 import numpy as np
 import jax.lax as lax
@@ -93,7 +93,7 @@ class Ros3p(AbstractAdaptiveSolver):
          ```
     """
 
-    term_structure: ClassVar = AbstractTerm
+    term_structure: ClassVar = ODETerm
     interpolation_cls: ClassVar[
         Callable[..., ThirdOrderHermitePolynomialInterpolation]
     ] = ThirdOrderHermitePolynomialInterpolation.from_k
@@ -109,7 +109,7 @@ class Ros3p(AbstractAdaptiveSolver):
 
     def step(
         self,
-        terms: AbstractTerm,
+        terms: ODETerm,
         t0: RealScalarLike,
         t1: RealScalarLike,
         y0: Y,
@@ -117,57 +117,47 @@ class Ros3p(AbstractAdaptiveSolver):
         solver_state: _SolverState,
         made_jump: BoolScalarLike,
     ) -> tuple[Y, Y, DenseInfo, _SolverState, RESULTS]:
+        y0_leaves = jtu.tree_leaves(y0)
+        sol_dtype = jnp.result_type(*y0_leaves)
+
         time_derivative = jax.jacfwd(lambda t: terms.vf(t, y0, args))(t0)
         control = terms.contr(t0, t1)
-        
-        def _sum(*x):
-            return sum(x[1:], x[0])
-        
-        def sum_if_tuple(arr):
-            if isinstance(arr, tuple):
-                return jtu.tree_map(_sum, *arr)
-            return arr
 
-        γ = jnp.array(self.tableau.γ)
-        α = jnp.array(self.tableau.α)
+        γ = jnp.array(self.tableau.γ, dtype=sol_dtype)
+        α = jnp.array(self.tableau.α, dtype=sol_dtype)
 
         def embed_lower(x):
             out = np.zeros(
-                (self.tableau.num_stages, self.tableau.num_stages), dtype=np.float64
+                (self.tableau.num_stages, self.tableau.num_stages), dtype=x.dtype
             )
             for i, val in enumerate(x):
                 out[i + 1, : i + 1] = val
-            return jnp.array(out, time_derivative.dtype)
+            return jnp.array(out, dtype=sol_dtype)
 
         a_lower = embed_lower(self.tableau.a_lower)
         c_lower = embed_lower(self.tableau.c_lower)
-        m_sol = jnp.array(self.tableau.m_sol)
-        m_error = jnp.array(self.tableau.m_error)
-        time_derivative = sum_if_tuple(time_derivative)
+        m_sol = jnp.array(self.tableau.m_sol, dtype=sol_dtype)
+        m_error = jnp.array(self.tableau.m_error, dtype=sol_dtype)
+
         # common L.H.S
-        eye_shape = jax.ShapeDtypeStruct(
-            time_derivative.shape, time_derivative.dtype
-        )
+        eye_shape = jax.ShapeDtypeStruct(time_derivative.shape, dtype=sol_dtype)
         A = (lx.IdentityLinearOperator(eye_shape) / (control * γ[0])) - (
             lx.JacobianLinearOperator(
                 lambda y, args: terms.vf(t0, y, args), y0, args=args
             )
         )
-        
 
         u = jnp.zeros(
-            (self.tableau.num_stages, ) + time_derivative.shape, dtype=time_derivative.dtype
+            (self.tableau.num_stages,) + time_derivative.shape, dtype=sol_dtype
         )
-
-        start_stage = 0
 
         def use_saved_vf(u):
             stage_0_vf = solver_state
-            with jax.numpy_dtype_promotion("standard"):
-                stage_0_b = (stage_0_vf**ω + (control**ω * γ[0] ** ω * time_derivative**ω)).ω
-                stage_0_u = lx.linear_solve(A, stage_0_b).value
-                
-            
+            stage_0_b = (
+                stage_0_vf**ω + (control**ω * γ[0] ** ω * time_derivative**ω)
+            ).ω
+            stage_0_u = lx.linear_solve(A, stage_0_b).value
+
             u = u.at[0].set(stage_0_u)
             start_stage = 1
             return u, start_stage
@@ -176,64 +166,60 @@ class Ros3p(AbstractAdaptiveSolver):
             u, start_stage = use_saved_vf(u)
         else:
             u, start_stage = lax.cond(
-                eqxi.unvmap_any(made_jump), use_saved_vf, lambda u: u, u
+                eqxi.unvmap_any(made_jump), use_saved_vf, lambda u: (u, 0), u
             )
-            
-        def body(u, stage):
-            with jax.numpy_dtype_promotion("standard"):
-                
-              vf = terms.vf(
-                      (t0**ω + α[stage] ** ω * control**ω).ω,
-                      (
-                          y0**ω
-                          + (a_lower[stage][0] ** ω * u[0] ** ω)
-                          + (a_lower[stage][1] ** ω * u[1] ** ω)
-                      ).ω,
-                      args,
-                  ) 
-              vf = sum_if_tuple(vf)
-              b = (
-                  vf**ω
-                  + ((c_lower[stage][0] ** ω / control**ω) * u[0] ** ω)
-                  + ((c_lower[stage][1] ** ω / control**ω) * u[1] ** ω)
-                  + (control**ω * γ[stage] ** ω * time_derivative**ω)
-              ).ω
-              stage_u = lx.linear_solve(A, b).value
-            u = u.at[stage].set(stage_u)
-            return u, None
 
-        u, _ = lax.scan(
+        def body(u, stage):
+            vf = terms.vf(
+                (t0**ω + α[stage] ** ω * control**ω).ω,
+                (
+                    y0**ω
+                    + (a_lower[stage][0] ** ω * u[0] ** ω)
+                    + (a_lower[stage][1] ** ω * u[1] ** ω)
+                ).ω,
+                args,
+            )
+            b = (
+                vf**ω
+                + ((c_lower[stage][0] ** ω / control**ω) * u[0] ** ω)
+                + ((c_lower[stage][1] ** ω / control**ω) * u[1] ** ω)
+                + (control**ω * γ[stage] ** ω * time_derivative**ω)
+            ).ω
+            stage_u = lx.linear_solve(A, b).value
+            u = u.at[stage].set(stage_u)
+            return u, vf
+
+        u, stage_vf = lax.scan(
             f=body, init=u, xs=jnp.arange(start_stage, self.tableau.num_stages)
         )
 
-
-        with jax.numpy_dtype_promotion("standard"):
-            
-          y1 = (
-              y0**ω
-              + m_sol[0] ** ω * u[0] ** ω
-              + m_sol[1] ** ω * u[1] ** ω
-              + m_sol[2] ** ω * u[2] ** ω
-          ).ω
-          y1_lower = (
-              y0**ω
-              + m_error[0] ** ω * u[0] ** ω
-              + m_error[1] ** ω * u[1] ** ω
-              + m_error[2] ** ω * u[2] ** ω
-          ).ω
+        y1 = (
+            y0**ω
+            + m_sol[0] ** ω * u[0] ** ω
+            + m_sol[1] ** ω * u[1] ** ω
+            + m_sol[2] ** ω * u[2] ** ω
+        ).ω
+        y1_lower = (
+            y0**ω
+            + m_error[0] ** ω * u[0] ** ω
+            + m_error[1] ** ω * u[1] ** ω
+            + m_error[2] ** ω * u[2] ** ω
+        ).ω
         y1_error = y1 - y1_lower
 
-        vf0 = solver_state
-        vf1 = sum_if_tuple(terms.vf(t1, y1, args))
-        k = jnp.stack((terms.prod(vf0,control), terms.prod(vf1,control)))
-        #jax.debug.print("y1 {} y1_lower {} y0 {} error {} t1 {} t0 {} stepsize {}", y1, y1_lower, y0,  y1_error, t1, t0, control)
+        if start_stage == 0:
+            vf0 = stage_vf[0]
+        else:
+            vf0 = solver_state
+        vf1 = terms.vf(t1, y1, args)
+        k = jnp.stack((terms.prod(vf0, control), terms.prod(vf1, control)))
 
         dense_info = dict(y0=y0, y1=y1, k=k)
         return y1, y1_error, dense_info, vf1, RESULTS.successful
 
     def func(
         self,
-        terms: AbstractTerm,
+        terms: ODETerm,
         t0: RealScalarLike,
         y0: Y,
         args: Args,
